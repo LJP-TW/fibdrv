@@ -35,7 +35,7 @@ static long long fib_sequence(long long k)
     fk0 = 0;
     fk1 = 1;
 
-    long long mask = 1 << (63 - ffs(k));
+    long long mask = 1 << (fls(k) - 1);
 
     while (mask) {
         long long fk20;  // F(2k)

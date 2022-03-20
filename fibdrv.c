@@ -29,13 +29,13 @@ static long long fib_sequence(long long k)
     long long fk0;  // F(k)
     long long fk1;  // F(k+1)
 
-    if (!k)
-        return 0;
+    if (k < 2)
+        return k;
 
-    fk0 = 0;
+    fk0 = 1;
     fk1 = 1;
 
-    long long mask = 1 << (fls(k) - 1);
+    long long mask = 1 << (fls(k) - 2);
 
     while (mask) {
         long long fk20;  // F(2k)

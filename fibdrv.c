@@ -7,6 +7,8 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 
+#include "bignum.h"
+
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
 MODULE_DESCRIPTION("Fibonacci engine driver");
@@ -17,45 +19,65 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 500
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+static void fib_sequence(long long k, bignum *result)
 {
-    long long fk0;  // F(k)
-    long long fk1;  // F(k+1)
+    bignum fk0;   // F(k)
+    bignum fk1;   // F(k+1)
+    bignum fk20;  // F(2k)
+    bignum fk21;  // F(2k+1)
+    bignum tmp1, tmp2;
 
-    if (k < 2)
-        return k;
+    if (k < 2) {
+        bn_release(result);
+        bn_init(result, k);
+        return;
+    }
 
-    fk0 = 1;
-    fk1 = 1;
+    bn_init(&fk0, 1);
+    bn_init(&fk1, 1);
+    bn_init(&fk20, 0);
+    bn_init(&fk21, 0);
+    bn_init(&tmp1, 0);
+    bn_init(&tmp2, 0);
 
     long long mask = 1 << (fls(k) - 2);
 
     while (mask) {
-        long long fk20;  // F(2k)
-        long long fk21;  // F(2k+1)
+        bn_add(&fk1, &fk1, &tmp1);
+        bn_sub(&tmp1, &fk0, &tmp1);
+        bn_mul(&fk0, &tmp1, &fk20);  // fk20 = fk0 * (2 * fk1 - fk0)
 
-        fk20 = fk0 * (2 * fk1 - fk0);
-        fk21 = fk0 * fk0 + fk1 * fk1;
-        fk0 = fk20;
-        fk1 = fk21;
+        bn_mul(&fk0, &fk0, &tmp1);
+        bn_mul(&fk1, &fk1, &tmp2);
+        bn_add(&tmp1, &tmp2, &fk21);  // fk21 = fk0 * fk0 + fk1 * fk1
+
+        bn_assign(&fk0, &fk20);  // fk0 = fk20
+        bn_assign(&fk1, &fk21);  // fk1 = fk21
 
         if (k & mask) {
-            fk20 = fk0 + fk1;
-            fk0 = fk1;
-            fk1 = fk20;
+            bn_add(&fk0, &fk1, &fk20);  // fk20 = fk0 + fk1
+            bn_assign(&fk0, &fk1);      // fk0 = fk1
+            bn_assign(&fk1, &fk20);     // fk1 = fk20
         }
 
         mask >>= 1;
     }
 
-    return fk0;
+    bn_assign(result, &fk0);  // return fk0
+
+    bn_release(&fk0);
+    bn_release(&fk1);
+    bn_release(&fk20);
+    bn_release(&fk21);
+    bn_release(&tmp1);
+    bn_release(&tmp2);
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -79,7 +101,23 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    bignum result;
+    int n;
+
+    bn_init(&result, 0);
+
+    fib_sequence(*offset, &result);
+
+    n = bn_size(&result);
+
+    if (n + 1 <= size) {
+        if (copy_to_user(buf, bn_str(&result), n + 1))
+            return -EFAULT;
+    }
+
+    bn_release(&result);
+
+    return n;
 }
 
 /* write operation is skipped */
